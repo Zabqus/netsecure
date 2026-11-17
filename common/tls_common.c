@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <openssl/crypto.h>
 #include <openssl/err.h>
@@ -42,6 +43,36 @@ void tls_ctx_harden(SSL_CTX *ctx, int tls13_only)
     SSL_CTX_set_options(ctx, SSL_OP_NO_COMPRESSION);
 
     // Listy szyfrów nie ustawiamy: domyślne w OpenSSL 3.5 są bezpieczne (AEAD, ECDHE).
+}
+
+void check_key_permissions(const char *path, const char *tag)
+{
+    // chroni przed: wyciekiem klucza prywatnego przez złe uprawnienia pliku –
+    // program nie startuje, jeśli klucz może czytać ktoś poza właścicielem
+    struct stat st;
+    if (stat(path, &st) < 0) {
+        perror(path);
+        exit(EXIT_FAILURE);
+    }
+    if (st.st_mode & (S_IRWXG | S_IRWXO)) {
+        fprintf(stderr, "%s plik klucza %s ma zbyt szerokie uprawnienia (%03o), "
+                        "wymagane 600: chmod 600 %s\n",
+                tag, path, (unsigned)(st.st_mode & 0777), path);
+        exit(EXIT_FAILURE);
+    }
+}
+
+void tls_load_cert_and_key(SSL_CTX *ctx, const char *cert, const char *key)
+{
+    // *_chain_file: plik może zawierać też certyfikaty pośrednie
+    if (SSL_CTX_use_certificate_chain_file(ctx, cert) <= 0)
+        tls_die("nie udało się wczytać certyfikatu");
+    if (SSL_CTX_use_PrivateKey_file(ctx, key, SSL_FILETYPE_PEM) <= 0)
+        tls_die("nie udało się wczytać klucza prywatnego");
+
+    // chroni przed: użyciem klucza, który nie pasuje do certyfikatu
+    if (!SSL_CTX_check_private_key(ctx))
+        tls_die("klucz prywatny nie pasuje do certyfikatu");
 }
 
 void set_socket_timeouts(int fd, int seconds)

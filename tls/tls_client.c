@@ -1,14 +1,17 @@
 /*
- * tls_client.c – klient echo TCP + TLS (oceny 3.0 / 3.5).
+ * tls_client.c – klient echo TCP + TLS (oceny 3.0 / 3.5 / 4.0).
  *
  * Uruchomienie:
  *   ./build/tls_client -h 192.168.1.201 --ca pki/out/selfsigned/server.crt
  *   ./build/tls_client -h 192.168.1.201 --ca pki/out/ca/ca.crt        (zaufane własne CA)
  *   ./build/tls_client -h net-server --ca ... -m "ala ma kota"
+ *   ./build/tls_client -h 192.168.1.201 --ca pki/out/ca/ca.crt
+ *       --cert pki/out/student-client/student-client.crt
+ *       --key pki/out/student-client/student-client.key           (mTLS)
  *   ./build/tls_client -h 192.168.1.201 --insecure       (BEZ weryfikacji – tylko demo)
  *
  * Przebieg:
- *   SSL_CTX (konfiguracja TLS, zaufane CA) → getaddrinfo/socket/connect →
+ *   SSL_CTX (konfiguracja TLS, zaufane CA, przy mTLS własny cert + klucz) → getaddrinfo/socket/connect →
  *   SSL_new + SSL_set_fd → oczekiwana nazwa/IP serwera → SSL_connect (handshake) →
  *   SSL_write/SSL_read (echo) → SSL_shutdown → SSL_free → close
  */
@@ -34,11 +37,13 @@
 static void usage(const char *prog)
 {
     fprintf(stderr, "Użycie: %s [-4|-6] -h <host> [-p <port>] (--ca <plik> | --insecure)\n"
-                    "          [--name <nazwa>] [--tls13] [-m \"wiadomość\"]\n"
+                    "          [--cert <plik> --key <plik>] [--name <nazwa>] [--tls13] [-m \"wiadomość\"]\n"
                     "  -h <host>      adres lub nazwa serwera\n"
                     "  -p <port>      port serwera (domyślnie " DEFAULT_PORT ")\n"
                     "  --ca <plik>    zaufany certyfikat (CA albo self-signed serwera)\n"
                     "  --insecure     NIE weryfikuj certyfikatu (podatne na MITM!)\n"
+                    "  --cert <plik>  certyfikat klienta (mTLS)\n"
+                    "  --key <plik>   klucz prywatny klienta (mTLS)\n"
                     "  --name <nazwa> nazwa/IP oczekiwane w certyfikacie (domyślnie -h)\n"
                     "  --tls13        tylko TLS 1.3\n"
                     "  -m <tekst>     wyślij jedną wiadomość i zakończ\n"
@@ -52,7 +57,8 @@ static int is_ip_address(const char *s)
     return inet_pton(AF_INET, s, tmp) == 1 || inet_pton(AF_INET6, s, tmp) == 1;
 }
 
-static SSL_CTX *create_context(const char *ca_file, int insecure, int tls13_only)
+static SSL_CTX *create_context(const char *ca_file, int insecure, const char *cert,
+                               const char *key, int tls13_only)
 {
     SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
     if (ctx == NULL)
@@ -72,6 +78,12 @@ static SSL_CTX *create_context(const char *ca_file, int insecure, int tls13_only
         SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
         if (!SSL_CTX_load_verify_file(ctx, ca_file))
             tls_die("nie udało się wczytać pliku --ca");
+    }
+
+    // mTLS: certyfikat, którym klient przedstawi się serwerowi, gdy ten o niego poprosi
+    if (cert != NULL) {
+        check_key_permissions(key, TAG);
+        tls_load_cert_and_key(ctx, cert, key);
     }
     return ctx;
 }
@@ -170,6 +182,8 @@ int main(int argc, char *argv[])
     const char *port = DEFAULT_PORT;
     const char *ca_file = NULL;
     const char *name = NULL;
+    const char *cert = NULL;
+    const char *key = NULL;
     const char *message = NULL;
     int family = AF_UNSPEC;
     int insecure = 0;
@@ -185,6 +199,10 @@ int main(int argc, char *argv[])
             port = argv[++i];
         else if (strcmp(argv[i], "--ca") == 0 && i + 1 < argc)
             ca_file = argv[++i];
+        else if (strcmp(argv[i], "--cert") == 0 && i + 1 < argc)
+            cert = argv[++i];
+        else if (strcmp(argv[i], "--key") == 0 && i + 1 < argc)
+            key = argv[++i];
         else if (strcmp(argv[i], "--name") == 0 && i + 1 < argc)
             name = argv[++i];
         else if (strcmp(argv[i], "-m") == 0 && i + 1 < argc)
@@ -211,13 +229,17 @@ int main(int argc, char *argv[])
         fprintf(stderr, "%s --ca i --insecure wykluczają się\n", TAG);
         return EXIT_FAILURE;
     }
+    if ((cert == NULL) != (key == NULL)) {
+        fprintf(stderr, "%s --cert i --key podaje się razem\n", TAG);
+        return EXIT_FAILURE;
+    }
     if (name == NULL)
         name = host;
 
     setvbuf(stdout, NULL, _IOLBF, 0);
     signal(SIGPIPE, SIG_IGN);   /* chroni przed: zabiciem procesu przy zapisie do zamkniętego połączenia */
 
-    SSL_CTX *ctx = create_context(ca_file, insecure, tls13_only);
+    SSL_CTX *ctx = create_context(ca_file, insecure, cert, key, tls13_only);
 
     int fd = connect_to(family, host, port);
     set_socket_timeouts(fd, IO_TIMEOUT_SEC);

@@ -23,6 +23,12 @@ _Noreturn void tls_die(const char *msg);
 // Ustawia minimalną wersję protokołu i wyłącza kompresję – wspólne dla klienta i serwera.
 void tls_ctx_harden(SSL_CTX *ctx, int tls13_only);
 
+// Kończy program, jeśli plik klucza prywatnego jest dostępny dla innych niż właściciel.
+void check_key_permissions(const char *path, const char *tag);
+
+// Wczytuje certyfikat i klucz prywatny do kontekstu i sprawdza, czy do siebie pasują.
+void tls_load_cert_and_key(SSL_CTX *ctx, const char *cert, const char *key);
+
 // Ustawia timeout odczytu i zapisu na gnieździe.
 void set_socket_timeouts(int fd, int seconds);
 

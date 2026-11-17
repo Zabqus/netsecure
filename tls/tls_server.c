@@ -1,15 +1,16 @@
 /*
- * tls_server.c – serwer echo TCP + TLS (oceny 3.0 / 3.5).
+ * tls_server.c – serwer echo TCP + TLS (oceny 3.0 / 3.5 / 4.0).
  *
  * Uruchomienie:
  *   ./build/tls_server --cert pki/out/selfsigned/server.crt --key pki/out/selfsigned/server.key
  *   ./build/tls_server --cert pki/out/server/server.crt --key pki/out/server/server.key  (od CA)
+ *   ./build/tls_server --cert ... --key ... --ca pki/out/ca/ca.crt --require-client-cert (mTLS)
  *   ./build/tls_server -6 -p 5443 --cert ... --key ... --tls13
  *
  * Przebieg:
- *   SSL_CTX (konfiguracja TLS, certyfikat + klucz) → socket/bind/listen →
- *   pętla: accept → SSL_new + SSL_set_fd → SSL_accept (handshake) →
- *   SSL_read/SSL_write (echo) → SSL_shutdown → SSL_free → close
+ *   SSL_CTX (konfiguracja TLS, certyfikat + klucz, przy mTLS zaufane CA) → socket/bind/listen →
+ *   pętla: accept → SSL_new + SSL_set_fd → SSL_accept (handshake, przy mTLS weryfikacja
+ *   certyfikatu klienta) → SSL_read/SSL_write (echo) → SSL_shutdown → SSL_free → close
  *
  * Klienci obsługiwani są po kolei (jeden naraz).
  */
@@ -22,7 +23,6 @@
 #include <unistd.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#include <sys/stat.h>
 
 #include <openssl/ssl.h>
 
@@ -44,49 +44,47 @@ static void on_sigint(int sig)
 
 static void usage(const char *prog)
 {
-    fprintf(stderr, "Użycie: %s [-4|-6] [-p <port>] --cert <plik> --key <plik> [--tls13]\n"
+    fprintf(stderr, "Użycie: %s [-4|-6] [-p <port>] --cert <plik> --key <plik>\n"
+                    "          [--ca <plik> [--require-client-cert]] [--tls13]\n"
                     "  -4 / -6        IPv4 (domyślnie) / IPv6\n"
                     "  -p <port>      port nasłuchu (domyślnie " DEFAULT_PORT ")\n"
                     "  --cert <plik>  certyfikat serwera (PEM)\n"
                     "  --key <plik>   klucz prywatny serwera (PEM)\n"
+                    "  --ca <plik>    CA, którym ufamy przy certyfikatach klientów (mTLS)\n"
+                    "  --require-client-cert  odrzuć klienta bez certyfikatu\n"
                     "  --tls13        tylko TLS 1.3 (domyślnie min. TLS 1.2)\n"
                     "  --version      wersja OpenSSL\n", prog);
     exit(EXIT_FAILURE);
 }
 
-// chroni przed: wyciekiem klucza prywatnego przez złe uprawnienia pliku –
-// serwer nie startuje, jeśli klucz może czytać ktoś poza właścicielem
-static void check_key_permissions(const char *path)
-{
-    struct stat st;
-    if (stat(path, &st) < 0)
-        die(path);
-    if (st.st_mode & (S_IRWXG | S_IRWXO)) {
-        fprintf(stderr, "%s plik klucza %s ma zbyt szerokie uprawnienia (%03o), "
-                        "wymagane 600: chmod 600 %s\n",
-                TAG, path, (unsigned)(st.st_mode & 0777), path);
-        exit(EXIT_FAILURE);
-    }
-}
-
-static SSL_CTX *create_context(const char *cert, const char *key, int tls13_only)
+static SSL_CTX *create_context(const char *cert, const char *key, const char *ca_file,
+                               int require_client_cert, int tls13_only)
 {
     SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
     if (ctx == NULL)
         tls_die("SSL_CTX_new");
 
     tls_ctx_harden(ctx, tls13_only);
+    tls_load_cert_and_key(ctx, cert, key);
 
-    // *_chain_file: plik może zawierać też certyfikaty pośrednie (przydatne przy CA)
-    if (SSL_CTX_use_certificate_chain_file(ctx, cert) <= 0)
-        tls_die("nie udało się wczytać certyfikatu");
-    if (SSL_CTX_use_PrivateKey_file(ctx, key, SSL_FILETYPE_PEM) <= 0)
-        tls_die("nie udało się wczytać klucza prywatnego");
+    if (ca_file != NULL) {
+        // mTLS – chroni przed: dostępem nieznanych klientów; serwer prosi klienta
+        // o certyfikat i sprawdza, czy podpisało go nasze CA (i czy ma clientAuth)
+        int mode = SSL_VERIFY_PEER;
+        if (require_client_cert)
+            mode |= SSL_VERIFY_FAIL_IF_NO_PEER_CERT;   /* brak certyfikatu = koniec */
+        SSL_CTX_set_verify(ctx, mode, NULL);
 
-    // chroni przed: uruchomieniem z kluczem, który nie pasuje do certyfikatu
-    if (!SSL_CTX_check_private_key(ctx))
-        tls_die("klucz prywatny nie pasuje do certyfikatu");
+        if (!SSL_CTX_load_verify_file(ctx, ca_file))
+            tls_die("nie udało się wczytać pliku --ca");
 
+        // nazwy zaufanych CA wysyłane w CertificateRequest – podpowiedź dla klienta,
+        // jaki certyfikat ma pokazać
+        STACK_OF(X509_NAME) *names = SSL_load_client_CA_file(ca_file);
+        if (names == NULL)
+            tls_die("SSL_load_client_CA_file");
+        SSL_CTX_set_client_CA_list(ctx, names);   /* kontekst przejmuje listę */
+    }
     return ctx;
 }
 
@@ -130,16 +128,28 @@ static int create_listen_socket(int family, const char *port)
 
 // Handshake i echo z jednym klientem. Zwraca 1, jeśli sesja skończyła się poprawnie
 // (wtedy wywołujący może wykonać SSL_shutdown), 0 przy błędzie.
-static int serve_client(SSL *ssl, const char *peer)
+static int serve_client(SSL *ssl, const char *peer, int mtls)
 {
     // handshake TLS: ClientHello → ServerHello, certyfikat, ... → Finished
+    // przy mTLS tu też klient przesyła swój certyfikat, a OpenSSL go weryfikuje
     int ret = SSL_accept(ssl);
     if (ret <= 0) {
         fprintf(stderr, "%s handshake z %s nieudany\n", TAG, peer);
+        long v = SSL_get_verify_result(ssl);   /* przy mTLS: dlaczego odrzucono certyfikat */
+        if (v != X509_V_OK)
+            fprintf(stderr, "%s weryfikacja certyfikatu klienta: %s\n",
+                    TAG, X509_verify_cert_error_string(v));
         tls_report_error(ssl, ret, TAG);
         return 0;   /* sesji TLS nie było, więc nie ma czego zamykać przez SSL_shutdown */
     }
     tls_print_session(ssl, TAG);
+
+    if (mtls) {
+        // tu certyfikat (jeśli jest) został już pozytywnie zweryfikowany przez OpenSSL
+        tls_print_peer_cert(ssl, TAG);
+        if (SSL_get0_peer_certificate(ssl) != NULL)
+            printf("%s klient %s uwierzytelniony certyfikatem (mTLS)\n", TAG, peer);
+    }
 
     char buf[MAX_MSG];
     while (!g_stop) {
@@ -160,7 +170,7 @@ static int serve_client(SSL *ssl, const char *peer)
     return 0;
 }
 
-static void handle_client(SSL_CTX *ctx, int cfd, const char *peer)
+static void handle_client(SSL_CTX *ctx, int cfd, const char *peer, int mtls)
 {
     set_socket_timeouts(cfd, IO_TIMEOUT_SEC);
 
@@ -172,7 +182,7 @@ static void handle_client(SSL_CTX *ctx, int cfd, const char *peer)
     // OpenSSL dostaje nasze gotowe gniazdo TCP – TLS działa nad naszą warstwą 4
     SSL_set_fd(ssl, cfd);
 
-    if (serve_client(ssl, peer)) {
+    if (serve_client(ssl, peer, mtls)) {
         // odsyłamy własne close_notify (po błędzie fatalnym tego robić nie wolno)
         SSL_shutdown(ssl);
     }
@@ -185,6 +195,8 @@ int main(int argc, char *argv[])
     const char *port = DEFAULT_PORT;
     const char *cert = NULL;
     const char *key = NULL;
+    const char *ca_file = NULL;
+    int require_client_cert = 0;
     int tls13_only = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -197,6 +209,10 @@ int main(int argc, char *argv[])
             cert = argv[++i];
         else if (strcmp(argv[i], "--key") == 0 && i + 1 < argc)
             key = argv[++i];
+        else if (strcmp(argv[i], "--ca") == 0 && i + 1 < argc)
+            ca_file = argv[++i];
+        else if (strcmp(argv[i], "--require-client-cert") == 0)
+            require_client_cert = 1;
         else if (strcmp(argv[i], "--tls13") == 0)
             tls13_only = 1;
         else if (strcmp(argv[i], "--version") == 0) {
@@ -207,6 +223,10 @@ int main(int argc, char *argv[])
     }
     if (cert == NULL || key == NULL)
         usage(argv[0]);
+    if (require_client_cert && ca_file == NULL) {
+        fprintf(stderr, "%s --require-client-cert wymaga --ca <plik>\n", TAG);
+        return EXIT_FAILURE;
+    }
 
     setvbuf(stdout, NULL, _IOLBF, 0);
 
@@ -221,8 +241,8 @@ int main(int argc, char *argv[])
     // chroni przed: zabiciem serwera sygnałem SIGPIPE przy zapisie do zamkniętego połączenia
     signal(SIGPIPE, SIG_IGN);
 
-    check_key_permissions(key);
-    SSL_CTX *ctx = create_context(cert, key, tls13_only);
+    check_key_permissions(key, TAG);
+    SSL_CTX *ctx = create_context(cert, key, ca_file, require_client_cert, tls13_only);
 
     int lfd = create_listen_socket(family, port);
 
@@ -234,6 +254,9 @@ int main(int argc, char *argv[])
     printf("%s nasłuchuję na %s (min. %s, Ctrl+C kończy)\n", TAG,
            addr_to_str((struct sockaddr *)&local, local_len, addr, sizeof addr),
            tls13_only ? "TLS 1.3" : "TLS 1.2");
+    if (ca_file != NULL)
+        printf("%s mTLS: certyfikat klienta %s, zaufane CA: %s\n", TAG,
+               require_client_cert ? "WYMAGANY" : "opcjonalny", ca_file);
 
     while (!g_stop) {
         struct sockaddr_storage peer;
@@ -248,7 +271,7 @@ int main(int argc, char *argv[])
         addr_to_str((struct sockaddr *)&peer, peer_len, addr, sizeof addr);
         printf("%s połączenie TCP od %s\n", TAG, addr);
 
-        handle_client(ctx, cfd, addr);
+        handle_client(ctx, cfd, addr, ca_file != NULL);
         close(cfd);
         printf("%s koniec sesji z %s\n", TAG, addr);
     }

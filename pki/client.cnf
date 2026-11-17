@@ -1,0 +1,18 @@
+# client.cnf – certyfikat klienta podpisywany przez CA (ocena 4.0, mTLS).
+# CN podaje skrypt: bash scripts/pki_issue.sh client <nazwa>
+
+[ req ]
+prompt             = no
+distinguished_name = dn
+
+[ dn ]
+O  = netsecure
+CN = student-client
+
+[ ext ]
+basicConstraints       = critical, CA:FALSE
+keyUsage               = critical, digitalSignature
+# tylko do uwierzytelniania klienta – serwer nie przyjmie certyfikatu serwerowego i odwrotnie
+extendedKeyUsage       = clientAuth
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid
