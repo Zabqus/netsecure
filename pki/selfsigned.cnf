@@ -1,0 +1,28 @@
+# selfsigned.cnf – konfiguracja certyfikatu self-signed serwera (ocena 3.0).
+# Używana przez scripts/pki_selfsigned.sh (openssl req -x509 -config ...).
+
+# prompt = no – dane bierzemy z [dn], bez pytań w terminalu
+[ req ]
+prompt             = no
+distinguished_name = dn
+x509_extensions    = ext
+
+[ dn ]
+CN = net-server
+
+[ ext ]
+# certyfikat końcowy (nie CA) – nie może podpisywać innych certyfikatów
+basicConstraints = critical, CA:FALSE
+# tylko do uwierzytelniania serwera TLS
+extendedKeyUsage = serverAuth
+subjectKeyIdentifier = hash
+# nazwy i adresy, pod którymi serwer jest osiągalny – klient porównuje je z -h / --name
+subjectAltName = @alt_names
+
+[ alt_names ]
+DNS.1 = net-server
+DNS.2 = localhost
+IP.1  = 192.168.1.201
+IP.2  = fd00:10::201
+IP.3  = 127.0.0.1
+IP.4  = ::1
