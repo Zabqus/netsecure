@@ -15,3 +15,6 @@ pki/out/
 
 # klucze sesji TLS (opcja --keylog) – pozwalają odszyfrować ruch
 keylog*.txt
+
+# opisy etapów – dopisywane na końcu projektu
+docs/

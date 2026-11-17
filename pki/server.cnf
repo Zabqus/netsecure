@@ -1,0 +1,27 @@
+# server.cnf – certyfikat serwera podpisywany przez nasze CA (ocena 3.5).
+# [req] – dane do CSR, [ext] – rozszerzenia nadawane przez CA przy podpisywaniu.
+# Używana przez scripts/pki_issue.sh server.
+
+[ req ]
+prompt             = no
+distinguished_name = dn
+
+[ dn ]
+O  = netsecure
+CN = net-server
+
+[ ext ]
+basicConstraints       = critical, CA:FALSE
+keyUsage               = critical, digitalSignature
+extendedKeyUsage       = serverAuth
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid
+subjectAltName         = @alt_names
+
+[ alt_names ]
+DNS.1 = net-server
+DNS.2 = localhost
+IP.1  = 192.168.1.201
+IP.2  = fd00:10::201
+IP.3  = 127.0.0.1
+IP.4  = ::1

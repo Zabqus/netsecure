@@ -1,0 +1,19 @@
+# ca.cnf – konfiguracja certyfikatu własnego CA (ocena 3.5).
+# Używana przez scripts/pki_ca_init.sh.
+
+[ req ]
+prompt             = no
+distinguished_name = dn
+x509_extensions    = v3_ca
+
+[ dn ]
+O  = netsecure
+CN = netsecure CA
+
+[ v3_ca ]
+# CA:TRUE – ten certyfikat może podpisywać inne; pathlen:0 – tylko certyfikaty końcowe
+# (nie da się pod nim zrobić kolejnego, pośredniego CA)
+basicConstraints     = critical, CA:TRUE, pathlen:0
+# klucz CA służy wyłącznie do podpisywania certyfikatów i list CRL
+keyUsage             = critical, keyCertSign, cRLSign
+subjectKeyIdentifier = hash

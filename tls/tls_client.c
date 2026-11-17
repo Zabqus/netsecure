@@ -1,8 +1,9 @@
 /*
- * tls_client.c – klient echo TCP + TLS (ocena 3.0).
+ * tls_client.c – klient echo TCP + TLS (oceny 3.0 / 3.5).
  *
  * Uruchomienie:
  *   ./build/tls_client -h 192.168.1.201 --ca pki/out/selfsigned/server.crt
+ *   ./build/tls_client -h 192.168.1.201 --ca pki/out/ca/ca.crt        (zaufane własne CA)
  *   ./build/tls_client -h net-server --ca ... -m "ala ma kota"
  *   ./build/tls_client -h 192.168.1.201 --insecure       (BEZ weryfikacji – tylko demo)
  *

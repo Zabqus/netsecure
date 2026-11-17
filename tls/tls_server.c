@@ -1,8 +1,9 @@
 /*
- * tls_server.c – serwer echo TCP + TLS (ocena 3.0).
+ * tls_server.c – serwer echo TCP + TLS (oceny 3.0 / 3.5).
  *
  * Uruchomienie:
  *   ./build/tls_server --cert pki/out/selfsigned/server.crt --key pki/out/selfsigned/server.key
+ *   ./build/tls_server --cert pki/out/server/server.crt --key pki/out/server/server.key  (od CA)
  *   ./build/tls_server -6 -p 5443 --cert ... --key ... --tls13
  *
  * Przebieg:
