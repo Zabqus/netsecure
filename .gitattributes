@@ -1,0 +1,4 @@
+# Pliki tekstowe zawsze z końcami linii LF – repo edytujemy na Windows,
+# a budujemy i uruchamiamy na Linuxie (bash nie znosi \r w skryptach).
+* text=auto eol=lf
+*.sh text eol=lf

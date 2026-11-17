@@ -1,0 +1,17 @@
+# katalogi budowania (skrypt i CLion)
+build/
+cmake-build-*/
+.idea/
+
+# notatki robocze – nie są częścią projektu
+CLAUDE.md
+zadanie.md
+
+# PKI: wygenerowane certyfikaty i klucze NIGDY nie trafiają do repo
+pki/out/
+*.key
+*.csr
+*.srl
+
+# klucze sesji TLS (opcja --keylog) – pozwalają odszyfrować ruch
+keylog*.txt
