@@ -13,6 +13,7 @@
 #include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <openssl/opensslv.h>
+#include <openssl/quic.h>
 #include <openssl/x509.h>
 
 void tls_print_version(const char *prog)
@@ -94,6 +95,16 @@ void tls_print_session(SSL *ssl, const char *tag)
 
     printf("%s sesja: %s, szyfr %s, wymiana klucza %s\n", tag,
            SSL_get_version(ssl), SSL_get_cipher(ssl), group != NULL ? group : "?");
+
+    // ALPN – uzgodniony protokół aplikacji (w QUIC obowiązkowy, w naszym TLS nieużywany)
+    const unsigned char *alpn;
+    unsigned int alpn_len;
+    SSL_get0_alpn_selected(ssl, &alpn, &alpn_len);
+    if (alpn_len > 0) {
+        printf("%s ALPN: ", tag);
+        print_safe((const char *)alpn, alpn_len);
+        printf("\n");
+    }
 }
 
 void tls_print_peer_cert(SSL *ssl, const char *tag)
@@ -168,6 +179,53 @@ int tls_report_error(SSL *ssl, int ret, const char *tag)
         ERR_print_errors_fp(stderr);
         return 0;
     }
+}
+
+int quic_report_error(SSL *ssl, int ret, const char *tag)
+{
+    int err = SSL_get_error(ssl, ret);
+
+    // druga strona zakończyła strumień (FIN) – odpowiednik close_notify w TLS
+    if (err == SSL_ERROR_ZERO_RETURN) {
+        printf("%s druga strona zakończyła strumień (FIN)\n", tag);
+        return 1;
+    }
+    if (err == SSL_ERROR_SSL && SSL_is_init_finished(ssl)
+        && SSL_get_stream_read_state(ssl) == SSL_STREAM_STATE_RESET_REMOTE) {
+        fprintf(stderr, "%s druga strona przerwała strumień (RESET_STREAM)\n", tag);
+        return 1;   /* strumień zerwany, ale połączenie QUIC nadal działa */
+    }
+
+    // połączenie QUIC zamknięte – sprawdzamy kto i dlaczego je zamknął
+    SSL_CONN_CLOSE_INFO info;
+    if (SSL_get_conn_close_info(ssl, &info, sizeof info)) {
+        if ((info.flags & SSL_CONN_CLOSE_FLAG_TRANSPORT)
+            && info.error_code == OSSL_QUIC_LOCAL_ERR_IDLE_TIMEOUT) {
+            fprintf(stderr, "%s połączenie zamknięte: brak aktywności przez %d s (idle timeout)\n",
+                    tag, IO_TIMEOUT_SEC);
+        } else if (ERR_GET_LIB(ERR_peek_error()) == ERR_LIB_SYS) {
+            // błąd gniazda UDP, np. ICMP "port unreachable" → ECONNREFUSED
+            fprintf(stderr, "%s błąd sieci: %s\n", tag, strerror(ERR_GET_REASON(ERR_peek_error())));
+        } else {
+            fprintf(stderr, "%s połączenie zamknięte przez %s, kod 0x%llx",
+                    tag, (info.flags & SSL_CONN_CLOSE_FLAG_LOCAL) ? "nas" : "drugą stronę",
+                    (unsigned long long)info.error_code);
+            // błędy TLS (np. odrzucony certyfikat) QUIC przenosi jako 0x100 + numer alertu TLS
+            if ((info.flags & SSL_CONN_CLOSE_FLAG_TRANSPORT)
+                && info.error_code >= OSSL_QUIC_ERR_CRYPTO_ERR_BEGIN
+                && info.error_code <= OSSL_QUIC_ERR_CRYPTO_ERR_END) {
+                int alert = (int)(info.error_code - OSSL_QUIC_ERR_CRYPTO_ERR_BEGIN);
+                fprintf(stderr, " (alert TLS: %s)", SSL_alert_desc_string_long(alert));
+            }
+            fprintf(stderr, "\n");
+        }
+        ERR_print_errors_fp(stderr);
+        return 0;
+    }
+
+    fprintf(stderr, "%s błąd QUIC (SSL_get_error = %d):\n", tag, err);
+    ERR_print_errors_fp(stderr);
+    return 0;
 }
 
 void print_safe(const char *buf, size_t len)

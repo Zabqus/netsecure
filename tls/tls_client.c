@@ -21,7 +21,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <arpa/inet.h>
 #include <sys/socket.h>
 
 #include <openssl/ssl.h>
@@ -49,12 +48,6 @@ static void usage(const char *prog)
                     "  -m <tekst>     wyślij jedną wiadomość i zakończ\n"
                     "  --version      wersja OpenSSL\n", prog);
     exit(EXIT_FAILURE);
-}
-
-static int is_ip_address(const char *s)
-{
-    unsigned char tmp[sizeof(struct in6_addr)];
-    return inet_pton(AF_INET, s, tmp) == 1 || inet_pton(AF_INET6, s, tmp) == 1;
 }
 
 static SSL_CTX *create_context(const char *ca_file, int insecure, const char *cert,

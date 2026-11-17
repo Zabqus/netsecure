@@ -27,4 +27,7 @@ int parse_family(const char *flag);
 // Długość tekstu bez końcowych '\n' / '\r' – do ładnego logowania.
 size_t text_len(const char *buf, size_t n);
 
+// 1, jeśli napis jest adresem IPv4 lub IPv6 (a nie nazwą hosta).
+int is_ip_address(const char *s);
+
 #endif /* NET_COMMON_H */

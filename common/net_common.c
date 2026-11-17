@@ -11,6 +11,7 @@
 #include <stdlib.h>      /* exit */
 #include <string.h>      /* strcmp */
 #include <netinet/in.h>  /* AF_INET, AF_INET6 */
+#include <arpa/inet.h>   /* inet_pton */
 
 void die(const char *msg)
 {
@@ -74,4 +75,10 @@ size_t text_len(const char *buf, size_t n)
     while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'))
         n--;
     return n;
+}
+
+int is_ip_address(const char *s)
+{
+    unsigned char tmp[sizeof(struct in6_addr)];
+    return inet_pton(AF_INET, s, tmp) == 1 || inet_pton(AF_INET6, s, tmp) == 1;
 }

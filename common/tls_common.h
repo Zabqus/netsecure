@@ -43,6 +43,14 @@ void tls_print_peer_cert(SSL *ssl, const char *tag);
 // albo minął timeout); 0 po błędzie fatalnym (SSL_ERROR_SSL/SYSCALL – bez SSL_shutdown).
 int tls_report_error(SSL *ssl, int ret, const char *tag);
 
+// Odpowiednik tls_report_error dla połączenia QUIC (też zwraca 1, gdy wolno SSL_shutdown).
+// Dodatkowo wypisuje przyczynę zamknięcia połączenia (idle timeout, alert TLS, kod błędu).
+int quic_report_error(SSL *ssl, int ret, const char *tag);
+
+// ALPN naszego protokołu echo w formacie TLS: bajt długości + nazwa (7, "ns-echo").
+#define QUIC_ALPN     "\x07ns-echo"
+#define QUIC_ALPN_LEN 8
+
 // Bezpieczne wypisanie danych od peera: znaki niedrukowalne jako \xNN.
 void print_safe(const char *buf, size_t len);
 
