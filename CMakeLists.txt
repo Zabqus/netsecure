@@ -47,3 +47,6 @@ target_link_libraries(tls_client PRIVATE netcommon)
 
 add_executable(quic_client quic/quic_client.c)
 target_link_libraries(quic_client PRIVATE netcommon)
+
+add_executable(quic_server quic/quic_server.c)
+target_link_libraries(quic_server PRIVATE netcommon)
