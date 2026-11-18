@@ -17,10 +17,6 @@ _Noreturn void die(const char *msg);
 // Adres gniazda jako tekst: "192.168.1.202:43122" albo "[fd00:10::202]:43122".
 const char *addr_to_str(const struct sockaddr *sa, socklen_t len, char *buf, size_t n);
 
-// Wysyła cały bufor przez zwykłe TCP (send() może wysłać tylko część). 0 – OK, -1 – błąd.
-// Uwaga: po zestawieniu TLS dane wysyłamy już przez SSL_write(), nie tą funkcją.
-int send_all(int fd, const void *buf, size_t len);
-
 // "-4" → AF_INET, "-6" → AF_INET6, inne → -1.
 int parse_family(const char *flag);
 

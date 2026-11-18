@@ -9,11 +9,11 @@ a OpenSSL dostaje gotowy deskryptor, czyli TLS/QUIC działa nad naszą warstwą 
 
 | Ocena | Zakres | Status |
 |---|---|---|
-| 3.0 | Klient i serwer TCP + TLS, certyfikat self-signed | – |
-| 3.5 | Własne CA, wystawianie certyfikatów | – |
-| 4.0 | Mutual TLS (certyfikat klienta) | – |
-| 4.5 | Klient QUIC | – |
-| 5.0 | Serwer QUIC | – |
+| 3.0 | Klient i serwer TCP + TLS, certyfikat self-signed | ✓ |
+| 3.5 | Własne CA, wystawianie certyfikatów | ✓ |
+| 4.0 | Mutual TLS (certyfikat klienta) | ✓ |
+| 4.5 | Klient QUIC | ✓ |
+| 5.0 | Serwer QUIC | ✓ |
 
 ## Wymagania
 
@@ -21,34 +21,44 @@ Debian 13 (OpenSSL 3.5), gcc, CMake ≥ 3.25:
 
 ```bash
 sudo apt install build-essential cmake git libssl-dev libssl-doc
-openssl version        # oczekiwane: OpenSSL 3.5.x
+openssl version        
 ```
 
 ## Budowanie
 
 ```bash
-bash scripts/build.sh              # domyślnie RelWithDebInfo (-O2 -g)
+bash scripts/build.sh              
 ./build/tls_server --version
 ./build/tls_client --version
+./build/quic_server --version
 ```
 
-## Struktura
+## Certyfikaty
 
+```bash
+bash scripts/pki_selfsigned.sh             # 3.0: self-signed serwera
+bash scripts/pki_ca_init.sh                # 3.5: CA (klucz CA zostaje na net-server)
+bash scripts/pki_issue.sh server           # certyfikat serwera od CA
+bash scripts/pki_issue.sh client student-client   # 4.0: certyfikat klienta
+bash scripts/pki_issue.sh rogue            # obce CA do testów negatywnych
+bash scripts/pki_show.sh <cert> [ca.crt]   # podgląd i weryfikacja
 ```
-common/   net_common.{h,c} – gniazda, adresy (z projektu 1)
-          tls_common.{h,c} – wspólne helpery OpenSSL
-tls/      tls_server.c, tls_client.c      (3.0 / 3.5 / 4.0)
-quic/     quic_server.c, quic_client.c    (4.5 / 5.0)
-pki/      konfiguracja CA i certyfikatów (pliki wygenerowane w pki/out/ – poza repo)
-scripts/  build.sh, skrypty PKI
-docs/     opis etapów, bezpieczeństwo, pytania kontrolne
+
+## Uruchomienie
+
+```bash
+
+./build/tls_server --cert pki/out/server/server.crt --key pki/out/server/server.key \
+                   [--ca pki/out/ca/ca.crt --require-client-cert] [-6] [--tls13]
+./build/tls_client -h 192.168.1.201 --ca pki/out/ca/ca.crt [-m "tekst"] \
+                   [--cert pki/out/student-client/student-client.crt --key pki/out/student-client/student-client.key]
+
+# QUIC
+./build/quic_server --cert pki/out/server/server.crt --key pki/out/server/server.key [-6]
+./build/quic_client -h 192.168.1.201 --ca pki/out/ca/ca.crt [-m "tekst"]
 ```
 
-## Środowisko testowe
 
-| Rola | Host | IPv4 | IPv6 |
-|---|---|---|---|
-| Serwer | `net-server` | 192.168.1.201 | fd00:10::201 |
-| Klient | `net-client` | 192.168.1.202 | fd00:10::202 |
+
 
 Porty: TLS **5443/TCP**, QUIC **4433/UDP**.

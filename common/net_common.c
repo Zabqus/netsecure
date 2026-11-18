@@ -1,11 +1,10 @@
 /*
  * net_common.c – implementacja wspólnych helperów (opis w net_common.h).
- * Przeniesione z projektu 1 (netstarter); usunięte addr_to_host i inet_checksum
- * (służyły do gniazd surowych, tutaj niepotrzebne).
+ * Przeniesione z projektu 1 (netstarter); usunięte addr_to_host, inet_checksum (gniazda
+ * surowe) i send_all (po zestawieniu TLS/QUIC dane wysyła SSL_write).
  */
 #include "net_common.h"
 
-#include <errno.h>       /* errno, EINTR */
 #include <netdb.h>       /* getnameinfo, gai_strerror, NI_* */
 #include <stdio.h>       /* perror, snprintf */
 #include <stdlib.h>      /* exit */
@@ -39,26 +38,6 @@ const char *addr_to_str(const struct sockaddr *sa, socklen_t len, char *buf, siz
         snprintf(buf, n, "%s:%s", host, port);
 
     return buf;
-}
-
-int send_all(int fd, const void *buf, size_t len)
-{
-    const char *p = buf;   /* pierwszy niewysłany bajt */
-    size_t left = len;     /* ile zostało do wysłania */
-
-    while (left > 0) {
-        // wysyłamy resztę danych (send() może przyjąć mniej, niż prosiliśmy)
-        // MSG_NOSIGNAL: przy zamkniętym połączeniu błąd zamiast zabicia programu
-        ssize_t sent = send(fd, p, left, MSG_NOSIGNAL);
-        if (sent < 0) {
-            if (errno == EINTR)   /* przerwane sygnałem – ponawiamy */
-                continue;
-            return -1;
-        }
-        p += sent;
-        left -= (size_t)sent;
-    }
-    return 0;
 }
 
 int parse_family(const char *flag)
